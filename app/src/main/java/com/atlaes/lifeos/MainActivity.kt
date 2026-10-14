@@ -234,7 +234,7 @@ fun LifeOsApp() {
     if (showBackupSetup && backupState.needsAuthorization) AlertDialog(
         onDismissRequest = { showBackupSetup = false; backupManager.markPromptSeen() },
         title = { Text("设置外部备份目录") },
-        text = { Text("请在手机共享存储中选择 Data 文件夹；LifeOS 将在其中创建 LifeOSDat。也可以直接选择 Data/LifeOSDat。若 Data 不存在，请先在系统文件选择器中创建。${if (backupState.status.startsWith("备份失败")) "\n\n${backupState.status}" else ""}") },
+        text = { Text("请在手机共享存储中选择 Data 文件夹；LifeOS 将在其中创建 LifeOSData。也可以直接选择 Data/LifeOSData。若 Data 不存在，请先在系统文件选择器中创建。${if (backupState.status.startsWith("备份失败") || backupState.status.contains("旧目录")) "\n\n${backupState.status}" else ""}") },
         confirmButton = { Button(onClick = {
             backupManager.markPromptSeen()
             showBackupSetup = false
@@ -963,7 +963,7 @@ private fun SettingsScreen() {
             item { SettingGroupTitle("外观") }
             item { SettingRow(Icons.Default.WbSunny, "主题", when (themeMode) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "浅色"; ThemeMode.DARK -> "深色" }, onClick = { showThemeDialog = true }) }
             item { SettingGroupTitle("外部备份") }
-            item { SettingRow(Icons.Default.FolderOpen, "备份目录", backupState.directory ?: "未授权 · 请选 Data/LifeOSDat", onClick = { directoryLauncher.launch(backupManager.initialPickerUri()) }) }
+            item { SettingRow(Icons.Default.FolderOpen, "备份目录", backupState.directory ?: "未授权 · 请选 Data/LifeOSData", onClick = { directoryLauncher.launch(backupManager.initialPickerUri()) }) }
             item {
                 Text(
                     "最近成功：${backupState.lastSuccessAt?.let(::formatBackupTime) ?: "尚无"}\n状态：${backupState.status}",

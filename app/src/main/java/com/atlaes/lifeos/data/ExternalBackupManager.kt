@@ -24,8 +24,11 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -42,6 +45,8 @@ class ExternalBackupManager(context: Context, private val database: LifeOsDataba
     private val appContext = context.applicationContext
     private val preferences = appContext.getSharedPreferences("external_backup", Context.MODE_PRIVATE)
     private val backupService = LifeOsBackupService(database)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val directoryLock = Any()
     private val mutex = Mutex()
     private val mutableState = MutableStateFlow(readState())
     val state: StateFlow<ExternalBackupState> = mutableState
@@ -56,8 +61,13 @@ class ExternalBackupManager(context: Context, private val database: LifeOsDataba
 
     fun start() {
         database.invalidationTracker.addObserver(observer)
-        if (preferences.getBoolean(KEY_ARMED, false) && savedTreeUri() != null) {
-            schedulePeriodicBackup()
+        if (savedTreeUri() != null) scope.launch {
+            runCatching { requireDirectory() }
+                .onSuccess {
+                    if (preferences.getBoolean(KEY_ARMED, false)) schedulePeriodicBackup()
+                    mutableState.value = readState()
+                }
+                .onFailure(::reportFailure)
         }
         mutableState.value = readState()
     }
@@ -74,19 +84,16 @@ class ExternalBackupManager(context: Context, private val database: LifeOsDataba
     suspend fun selectDirectory(uri: Uri): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val id = DocumentsContract.getTreeDocumentId(uri)
-            require(id == "primary:Data" || id == "primary:Data/LifeOSDat") {
-                "请选择手机共享存储的 Data 文件夹或其中的 LifeOSDat 文件夹"
+            require(id == PARENT_TREE_ID || id == TARGET_TREE_ID) {
+                "请选择手机共享存储的 Data 文件夹或其中的 LifeOSData 文件夹"
             }
             appContext.contentResolver.takePersistableUriPermission(
                 uri,
                 Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
             )
             val selected = DocumentFile.fromTreeUri(appContext, uri) ?: error("无法打开所选目录")
-            val target = if (id == "primary:Data") {
-                selected.findFile("LifeOSDat") ?: selected.createDirectory("LifeOSDat")
-                    ?: error("无法自动创建 LifeOSDat，请在系统文件选择器中手动创建并选择它")
-            } else selected
-            require(target.isDirectory && target.canWrite()) { "目标目录不可写，请重新选择 Data/LifeOSDat" }
+            val target = if (id == PARENT_TREE_ID) synchronized(directoryLock) { ensureTargetDirectory(selected) } else selected
+            require(target.isDirectory && target.canWrite()) { "目标目录不可写，请重新选择 Data/LifeOSData" }
             val existing = backupFiles(target).isNotEmpty()
             val alreadyArmed = uri.toString() == preferences.getString(KEY_TREE_URI, null) &&
                 preferences.getBoolean(KEY_ARMED, false)
@@ -172,17 +179,73 @@ class ExternalBackupManager(context: Context, private val database: LifeOsDataba
     }
 
     private fun requireDirectory(): DocumentFile {
-        val uri = savedTreeUri() ?: error("目录授权不可用，请重新选择 Data/LifeOSDat")
+        val uri = savedTreeUri() ?: error(
+            if (isLegacyChildSelected()) "旧目录 LifeOSDat 的授权不能用于新目录，请重新选择 Data 文件夹"
+            else "目录授权不可用，请重新选择 Data/LifeOSData",
+        )
         val root = DocumentFile.fromTreeUri(appContext, uri) ?: error("无法访问备份目录，请重新授权")
         val id = DocumentsContract.getTreeDocumentId(uri)
-        val target = if (id == "primary:Data") root.findFile("LifeOSDat") else root
-        require(target?.isDirectory == true && target.canWrite()) { "备份目录不可访问或不可写，请重新授权" }
+        val target = if (id == PARENT_TREE_ID) synchronized(directoryLock) { ensureTargetDirectory(root) } else root
+        require(target.isDirectory && target.canWrite()) { "备份目录不可访问或不可写，请重新授权" }
         return target
+    }
+
+    private fun ensureTargetDirectory(parent: DocumentFile): DocumentFile {
+        val legacy = parent.findFile(LEGACY_FOLDER)?.takeIf { it.isDirectory }
+        var target = parent.findFile(TARGET_FOLDER)
+        if (target == null && legacy != null && legacy.renameTo(TARGET_FOLDER)) {
+            target = parent.findFile(TARGET_FOLDER)
+        }
+        if (target == null) {
+            target = parent.createDirectory(TARGET_FOLDER)
+                ?: error("无法自动创建 $TARGET_FOLDER，请在系统文件选择器中手动创建并选择它")
+        }
+        require(target.isDirectory) { "$TARGET_FOLDER 已存在，但不是文件夹" }
+        if (legacy != null && !preferences.getBoolean(KEY_LEGACY_MIGRATED, false)) {
+            if (legacy.uri != target.uri) {
+                backupFiles(legacy).forEach { source ->
+                    if (target.findFile(source.name.orEmpty()) == null) copyLegacyBackup(source, target)
+                }
+            }
+            check(preferences.edit().putBoolean(KEY_LEGACY_MIGRATED, true).commit()) { "无法保存旧备份迁移状态" }
+        }
+        return target
+    }
+
+    private fun copyLegacyBackup(source: DocumentFile, target: DocumentFile) {
+        val name = source.name ?: error("旧备份没有文件名")
+        val pending = target.createFile("application/json", name.removeSuffix(".json") + ".pending.json")
+            ?: throw IOException("无法复制旧备份到 $TARGET_FOLDER")
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            val input = appContext.contentResolver.openInputStream(source.uri) ?: throw IOException("无法读取旧备份 $name")
+            val output = appContext.contentResolver.openOutputStream(pending.uri, "wt")
+                ?: throw IOException("无法写入迁移中的备份 $name")
+            input.use { reader -> output.use { writer ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val length = reader.read(buffer)
+                    if (length < 0) break
+                    digest.update(buffer, 0, length)
+                    writer.write(buffer, 0, length)
+                }
+                writer.flush()
+            } }
+            val expectedHash = digest.digest()
+            verifyHash(pending, expectedHash)
+            if (!pending.renameTo(name)) throw IOException("无法完成旧备份迁移：$name")
+            val copied = target.findFile(name) ?: throw IOException("迁移后找不到备份：$name")
+            verifyHash(copied, expectedHash)
+        } catch (error: Exception) {
+            runCatching { pending.delete() }
+            throw error
+        }
     }
 
     private fun savedTreeUri(): Uri? {
         val uri = preferences.getString(KEY_TREE_URI, null)?.let(Uri::parse) ?: return null
         return uri.takeIf { saved ->
+            runCatching { DocumentsContract.getTreeDocumentId(saved) in setOf(PARENT_TREE_ID, TARGET_TREE_ID) }.getOrDefault(false) &&
             appContext.contentResolver.persistedUriPermissions.any {
                 it.uri == saved && it.isReadPermission && it.isWritePermission
             }
@@ -194,13 +257,14 @@ class ExternalBackupManager(context: Context, private val database: LifeOsDataba
         val lastSuccess = preferences.getLong(KEY_LAST_SUCCESS, 0L).takeIf { it > 0L }
         val status = message ?: preferences.getString(KEY_ERROR, null)?.let { "备份失败：$it" }
             ?: when {
-                !authorized -> "请选择并授权 Data/LifeOSDat 目录"
+                !authorized && isLegacyChildSelected() -> "旧目录 LifeOSDat 的授权不能用于新目录，请重新选择 Data 文件夹"
+                !authorized -> "请选择并授权 Data/LifeOSData 目录"
                 !preferences.getBoolean(KEY_ARMED, false) -> "检测到已有备份，请先导入恢复，或选择立即备份"
                 lastSuccess != null -> "最近一次备份成功"
                 else -> "等待首次备份"
             }
         return ExternalBackupState(
-            directory = if (authorized) "手机共享存储/Data/LifeOSDat/" else null,
+            directory = if (authorized) "手机共享存储/Data/LifeOSData/" else null,
             lastSuccessAt = lastSuccess,
             status = status,
             isRunning = isRunning,
@@ -219,9 +283,15 @@ class ExternalBackupManager(context: Context, private val database: LifeOsDataba
         setError(error)
     }
 
+    private fun isLegacyChildSelected(): Boolean = preferences.getString(KEY_TREE_URI, null)
+        ?.let { runCatching { DocumentsContract.getTreeDocumentId(Uri.parse(it)) == LEGACY_TREE_ID }.getOrDefault(false) }
+        ?: false
+
     private fun verifyBytes(file: DocumentFile, expected: ByteArray) {
-        val digest = MessageDigest.getInstance("SHA-256")
-        val expectedHash = digest.digest(expected)
+        verifyHash(file, MessageDigest.getInstance("SHA-256").digest(expected))
+    }
+
+    private fun verifyHash(file: DocumentFile, expectedHash: ByteArray) {
         val actualHash = appContext.contentResolver.openInputStream(file.uri)?.use { input ->
             val verifier = MessageDigest.getInstance("SHA-256")
             val buffer = ByteArray(8192)
@@ -260,11 +330,17 @@ class ExternalBackupManager(context: Context, private val database: LifeOsDataba
     }
 
     companion object {
+        private const val PARENT_TREE_ID = "primary:Data"
+        private const val TARGET_TREE_ID = "primary:Data/LifeOSData"
+        private const val LEGACY_TREE_ID = "primary:Data/LifeOSDat"
+        private const val TARGET_FOLDER = "LifeOSData"
+        private const val LEGACY_FOLDER = "LifeOSDat"
         private const val KEY_TREE_URI = "tree_uri"
         private const val KEY_LAST_SUCCESS = "last_success"
         private const val KEY_ERROR = "last_error"
         private const val KEY_ARMED = "armed"
         private const val KEY_PROMPT_SEEN = "prompt_seen"
+        private const val KEY_LEGACY_MIGRATED = "legacy_migrated"
         private const val CHANGED_WORK = "lifeos_changed_data_backup"
         private const val PERIODIC_WORK = "lifeos_periodic_backup"
         private const val MAX_IMPORT_BYTES = 100 * 1024 * 1024
