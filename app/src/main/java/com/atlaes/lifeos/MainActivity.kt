@@ -652,20 +652,21 @@ private fun JournalScreen(
     entries: List<com.atlaes.lifeos.data.database.JournalEntryEntity>,
     onSave: (String, String, String, String, String, String, String, String) -> Unit,
 ) {
+    val numberedTemplate = "1.\n2.\n3."
     val context = LocalContext.current
     val app = context.applicationContext as LifeOsApplication
     val scope = rememberCoroutineScope()
     val transferService = remember { JournalTransferService(app.database) }
     val today = LocalDate.now().toString()
     val entry = entries.firstOrNull { it.localDate == today }
-    var completed by remember(entry?.id) { mutableStateOf(entry?.completedText.orEmpty()) }
+    var completed by remember(entry?.id) { mutableStateOf(entry?.completedText?.ifBlank { numberedTemplate } ?: numberedTemplate) }
     var learned by remember(entry?.id) { mutableStateOf(entry?.learnedText.orEmpty()) }
     var reflection by remember(entry?.id) { mutableStateOf(entry?.reflectionText.orEmpty()) }
     var change by remember(entry?.id) { mutableStateOf(entry?.changeText.orEmpty()) }
     var tomorrow by remember(entry?.id) { mutableStateOf(entry?.tomorrowText.orEmpty()) }
     var affirmation by remember(entry?.id) { mutableStateOf(entry?.selfAffirmationText.orEmpty()) }
     var gratitude by remember(entry?.id) { mutableStateOf(entry?.gratitudeText.orEmpty()) }
-    var tomorrowThree by remember(entry?.id) { mutableStateOf(entry?.tomorrowThreeText.orEmpty()) }
+    var tomorrowThree by remember(entry?.id) { mutableStateOf(entry?.tomorrowThreeText?.ifBlank { numberedTemplate } ?: numberedTemplate) }
     var importPreview by remember { mutableStateOf<com.atlaes.lifeos.data.JournalImportPreview?>(null) }
     val dateLabel = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE  M月d日"))
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
