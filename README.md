@@ -24,6 +24,7 @@ LifeOS 围绕五个动作设计：
 - 笔记迁移：单篇 Markdown、全部笔记 ZIP 导出，Markdown 或 ZIP 导入预览与合并
 - 日记：按日期保存完整反思模板，包括完成事项、收获、问题内耗、可改变事项、明天最小行动、自我肯定、感恩和明日三件事
 - 日记迁移：独立 JSON 导入导出，支持预览、按日期合并和覆盖同日期内容
+- 学习方法：从“更多”进入，浏览和搜索 15 种学习方法，查看完整步骤与适用边界
 - 数据导出：通过 Android Storage Access Framework 导出完整 JSON
 - 数据导入：JSON 格式校验、导入预览、合并导入和覆盖恢复
 - 备份恢复：Room 事务写入，恢复失败时不执行部分替换
@@ -56,6 +57,7 @@ app/src/main/java/com/atlaes/lifeos/
     ├── LifeOsBackupService.kt      # JSON 备份、导入和 Markdown 导出
     ├── NoteMarkdownService.kt      # Markdown 和 ZIP 笔记迁移
     ├── ThemePreference.kt          # 主题偏好
+    ├── LearningMethods.kt          # 15 种学习方法内容
     └── database/
         ├── LifeOsDatabase.kt       # Room 数据库和 Migration
         ├── LifeOsDaos.kt           # DAO

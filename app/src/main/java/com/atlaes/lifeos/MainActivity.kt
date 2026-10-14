@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -35,6 +36,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Bookmark
@@ -50,7 +52,6 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Settings
@@ -108,6 +109,8 @@ import com.atlaes.lifeos.data.LifeOsBackupService
 import com.atlaes.lifeos.data.NoteMarkdownService
 import com.atlaes.lifeos.data.MarkdownNote
 import com.atlaes.lifeos.data.JournalTransferService
+import com.atlaes.lifeos.data.LearningMethod
+import com.atlaes.lifeos.data.learningMethods
 import com.atlaes.lifeos.data.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -137,7 +140,7 @@ private val destinations = listOf(
 )
 
 private fun topLevelRoute(route: String?): String = when (route) {
-    "journal", "settings" -> "more"
+    "journal", "settings", "learningMethods" -> "more"
     else -> route ?: "dashboard"
 }
 
@@ -189,6 +192,7 @@ fun LifeOsApp() {
             composable("more") { MoreScreen(onOpen = navController::navigate) }
             composable("journal") { JournalScreen(entries = uiState.journalEntries, onSave = lifeOsViewModel::saveJournal) }
             composable("settings") { SettingsScreen() }
+            composable("learningMethods") { LearningMethodsScreen() }
         }
     }
 }
@@ -628,10 +632,89 @@ private fun MoreScreen(onOpen: (String) -> Unit) {
     LifeOsPage(title = "更多", eyebrow = "回顾与管理") { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             MoreRow(Icons.Default.EditNote, "每日日记", "记录今天，给明天留下一点方向") { onOpen("journal") }
+            MoreRow(Icons.AutoMirrored.Filled.MenuBook, "学习方法", "15 种方法，按问题选择下一步") { onOpen("learningMethods") }
             MoreRow(Icons.Default.Settings, "设置", "主题、数据导入导出和备份恢复") { onOpen("settings") }
             Spacer(Modifier.height(12.dp))
             Text("LifeOS 1.0  ·  本地优先", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+    }
+}
+
+@Composable
+private fun LearningMethodsScreen() {
+    var query by remember { mutableStateOf("") }
+    var selectedMethod by remember { mutableStateOf<LearningMethod?>(null) }
+    val filteredMethods = learningMethods.filter { method ->
+        query.isBlank() || listOf(method.name, method.tag, method.problem, method.intro).any { it.contains(query, ignoreCase = true) }
+    }
+    LifeOsPage(title = "学习方法", eyebrow = "选择适合当前问题的方法") { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item { SearchInput("搜索方法、标签或问题", query) { query = it } }
+            item { Text("共 ${filteredMethods.size} 种方法", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            items(filteredMethods, key = { it.name }) { method ->
+                LearningMethodRow(method) { selectedMethod = method }
+            }
+            if (filteredMethods.isEmpty()) item { EmptyHint("没有找到匹配的学习方法") }
+        }
+    }
+    selectedMethod?.let { method ->
+        AlertDialog(
+            onDismissRequest = { selectedMethod = null },
+            title = { Text(method.name) },
+            text = {
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    item {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            AssistChip(onClick = {}, label = { Text(method.tag) })
+                            Text("主要解决：${method.problem}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
+                        }
+                    }
+                    item { MethodSection("建议时长", method.duration) }
+                    item { MethodSection("方法简介", method.intro) }
+                    item { MethodSection("核心原理", method.principle) }
+                    item { Text("操作步骤", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                    items(method.steps) { step -> Text(step, modifier = Modifier.padding(start = 8.dp)) }
+                    item { MethodSection("完整示例", method.example) }
+                    item { MethodSection("适用场景", method.scenarios) }
+                    item { MethodSection("常见误区", method.pitfalls) }
+                    item { MethodSection("实践建议", method.practice) }
+                    item { MethodSection("适用边界", method.boundary) }
+                }
+            },
+            confirmButton = { TextButton(onClick = { selectedMethod = null }) { Text("关闭") } },
+        )
+    }
+}
+
+@Composable
+private fun LearningMethodRow(method: LearningMethod, onClick: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().animateContentSize().clickable(onClick = onClick),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(30.dp))
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(method.name, fontWeight = FontWeight.SemiBold)
+                Text("${method.tag} · 主要解决：${method.problem}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("建议 ${method.duration}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+            }
+            Icon(Icons.Default.ChevronRight, contentDescription = "查看详情", tint = MaterialTheme.colorScheme.outline)
+        }
+    }
+}
+
+@Composable
+private fun MethodSection(title: String, content: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(content, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
