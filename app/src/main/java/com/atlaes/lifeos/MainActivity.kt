@@ -13,19 +13,20 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -37,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Bookmark
@@ -99,6 +101,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.tooling.preview.Preview
@@ -140,7 +144,7 @@ private val destinations = listOf(
 )
 
 private fun topLevelRoute(route: String?): String = when (route) {
-    "journal", "settings", "learningMethods" -> "more"
+    "journal", "settings", "learningMethods", "learningMethod/{index}" -> "more"
     else -> route ?: "dashboard"
 }
 
@@ -192,7 +196,19 @@ fun LifeOsApp() {
             composable("more") { MoreScreen(onOpen = navController::navigate) }
             composable("journal") { JournalScreen(entries = uiState.journalEntries, onSave = lifeOsViewModel::saveJournal) }
             composable("settings") { SettingsScreen() }
-            composable("learningMethods") { LearningMethodsScreen() }
+            composable("learningMethods") {
+                LearningMethodsScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpen = { method -> navController.navigate("learningMethod/${learningMethods.indexOf(method)}") },
+                )
+            }
+            composable(
+                route = "learningMethod/{index}",
+                arguments = listOf(navArgument("index") { type = NavType.IntType }),
+            ) { entry ->
+                val method = learningMethods.getOrNull(entry.arguments?.getInt("index") ?: -1)
+                if (method != null) LearningMethodDetailScreen(method, onBack = { navController.popBackStack() })
+            }
         }
     }
 }
@@ -202,6 +218,8 @@ fun LifeOsApp() {
 private fun LifeOsPage(
     title: String,
     eyebrow: String,
+    navigationIcon: (@Composable () -> Unit)? = null,
+    subtitleBelowTitle: Boolean = false,
     action: (@Composable () -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit,
 ) {
@@ -210,10 +228,16 @@ private fun LifeOsPage(
             TopAppBar(
                 title = {
                     Column {
-                        Text(eyebrow, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                        Text(title, fontWeight = FontWeight.SemiBold)
+                        if (subtitleBelowTitle) {
+                            Text(title, fontWeight = FontWeight.SemiBold)
+                            Text(eyebrow, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else {
+                            Text(eyebrow, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            Text(title, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 },
+                navigationIcon = { navigationIcon?.invoke() },
                 actions = { action?.invoke() },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
@@ -641,52 +665,29 @@ private fun MoreScreen(onOpen: (String) -> Unit) {
 }
 
 @Composable
-private fun LearningMethodsScreen() {
+private fun LearningMethodsScreen(onBack: () -> Unit, onOpen: (LearningMethod) -> Unit) {
     var query by remember { mutableStateOf("") }
-    var selectedMethod by remember { mutableStateOf<LearningMethod?>(null) }
     val filteredMethods = learningMethods.filter { method ->
         query.isBlank() || listOf(method.name, method.tag, method.problem, method.intro).any { it.contains(query, ignoreCase = true) }
     }
-    LifeOsPage(title = "学习方法", eyebrow = "选择适合当前问题的方法") { padding ->
+    LifeOsPage(
+        title = "学习方法",
+        eyebrow = "选择适合当前问题的方法",
+        navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回更多") } },
+        subtitleBelowTitle = true,
+    ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item { SearchInput("搜索方法、标签或问题", query) { query = it } }
-            item { Text("共 ${filteredMethods.size} 种方法", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            item { Text("${filteredMethods.size} 种方法", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             items(filteredMethods, key = { it.name }) { method ->
-                LearningMethodRow(method) { selectedMethod = method }
+                LearningMethodRow(method) { onOpen(method) }
             }
             if (filteredMethods.isEmpty()) item { EmptyHint("没有找到匹配的学习方法") }
         }
-    }
-    selectedMethod?.let { method ->
-        AlertDialog(
-            onDismissRequest = { selectedMethod = null },
-            title = { Text(method.name) },
-            text = {
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    item {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            AssistChip(onClick = {}, label = { Text(method.tag) })
-                            Text("主要解决：${method.problem}", style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 8.dp))
-                        }
-                    }
-                    item { MethodSection("建议时长", method.duration) }
-                    item { MethodSection("方法简介", method.intro) }
-                    item { MethodSection("核心原理", method.principle) }
-                    item { Text("操作步骤", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
-                    items(method.steps) { step -> Text(step, modifier = Modifier.padding(start = 8.dp)) }
-                    item { MethodSection("完整示例", method.example) }
-                    item { MethodSection("适用场景", method.scenarios) }
-                    item { MethodSection("常见误区", method.pitfalls) }
-                    item { MethodSection("实践建议", method.practice) }
-                    item { MethodSection("适用边界", method.boundary) }
-                }
-            },
-            confirmButton = { TextButton(onClick = { selectedMethod = null }) { Text("关闭") } },
-        )
     }
 }
 
@@ -695,26 +696,80 @@ private fun LearningMethodRow(method: LearningMethod, onClick: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().animateContentSize().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)),
         shape = RoundedCornerShape(16.dp),
     ) {
-        Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.AutoMirrored.Filled.MenuBook, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(30.dp))
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(method.name, fontWeight = FontWeight.SemiBold)
-                Text("${method.tag} · 主要解决：${method.problem}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text("建议 ${method.duration}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(method.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape) {
+                    Text(method.duration, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp))
+                }
             }
-            Icon(Icons.Default.ChevronRight, contentDescription = "查看详情", tint = MaterialTheme.colorScheme.outline)
+            Text("${method.tag} · 主要解决：${method.problem}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(method.steps.joinToString("  →  "), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("建议 ${method.duration} · 查看详情", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                Icon(Icons.Default.ChevronRight, contentDescription = "查看详情", tint = MaterialTheme.colorScheme.outline)
+            }
         }
     }
 }
 
 @Composable
-private fun MethodSection(title: String, content: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+private fun LearningMethodDetailScreen(method: LearningMethod, onBack: () -> Unit) {
+    LifeOsPage(
+        title = method.name,
+        eyebrow = "${method.tag} · 建议 ${method.duration}",
+        navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回学习方法") } },
+        subtitleBelowTitle = true,
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(padding),
+            contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item { MethodSectionCard("方法简介", method.intro) }
+            item { MethodSectionCard("核心原理", method.principle) }
+            item {
+                MethodCard {
+                    Text("操作步骤", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    method.steps.forEachIndexed { index, step ->
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Box(modifier = Modifier.size(30.dp).clip(CircleShape).background(MaterialTheme.colorScheme.secondaryContainer), contentAlignment = Alignment.Center) {
+                                Text("${index + 1}", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                            }
+                            Text(step, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+            }
+            item { MethodSectionCard("完整示例", method.example) }
+            item { MethodSectionCard("适用场景", method.scenarios) }
+            item { MethodSectionCard("常见误区", method.pitfalls) }
+            item { MethodSectionCard("实践建议", method.practice) }
+            item { MethodSectionCard("适用边界", method.boundary, accent = MaterialTheme.colorScheme.tertiary) }
+        }
+    }
+}
+
+@Composable
+private fun MethodSectionCard(title: String, content: String, accent: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary) {
+    MethodCard {
+        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = accent)
         Text(content, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+private fun MethodCard(content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth().animateContentSize(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.14f)),
+        shape = RoundedCornerShape(16.dp),
+    ) {
+        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content)
     }
 }
 
