@@ -9,7 +9,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [HabitEntity::class, HabitRecordEntity::class, GoalEntity::class, NoteEntity::class, TagEntity::class, NoteTagRelation::class, JournalEntryEntity::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class LifeOsDatabase : RoomDatabase() {
@@ -27,7 +27,7 @@ abstract class LifeOsDatabase : RoomDatabase() {
                 context.applicationContext,
                 LifeOsDatabase::class.java,
                 "lifeos.db",
-            ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+            ).addMigrations(MIGRATION_1_2, MIGRATION_2_3).build().also { instance = it }
         }
 
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -41,6 +41,15 @@ abstract class LifeOsDatabase : RoomDatabase() {
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_note_tag_relations_tagId ON note_tag_relations(tagId)")
                 db.execSQL("CREATE TABLE IF NOT EXISTS journal_entries (id TEXT NOT NULL PRIMARY KEY, localDate TEXT NOT NULL, completedText TEXT NOT NULL, learnedText TEXT NOT NULL, reflectionText TEXT NOT NULL, tomorrowText TEXT NOT NULL, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)")
                 db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_journal_entries_localDate ON journal_entries(localDate)")
+            }
+        }
+
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE journal_entries ADD COLUMN changeText TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE journal_entries ADD COLUMN selfAffirmationText TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE journal_entries ADD COLUMN gratitudeText TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE journal_entries ADD COLUMN tomorrowThreeText TEXT NOT NULL DEFAULT ''")
             }
         }
     }

@@ -185,7 +185,9 @@ private fun TagEntity.toJson() = JSONObject().apply { put("id", id); put("name",
 private fun NoteTagRelation.toJson() = JSONObject().apply { put("noteId", noteId); put("tagId", tagId) }
 private fun JournalEntryEntity.toJson() = JSONObject().apply {
     put("id", id); put("localDate", localDate); put("completedText", completedText); put("learnedText", learnedText)
-    put("reflectionText", reflectionText); put("tomorrowText", tomorrowText); put("createdAt", createdAt); put("updatedAt", updatedAt)
+    put("reflectionText", reflectionText); put("tomorrowText", tomorrowText); put("changeText", changeText)
+    put("selfAffirmationText", selfAffirmationText); put("gratitudeText", gratitudeText); put("tomorrowThreeText", tomorrowThreeText)
+    put("createdAt", createdAt); put("updatedAt", updatedAt)
 }
 
 private fun JSONObject.toHabit() = HabitEntity(getString("id"), getString("title"), getDouble("targetValue"), getString("unit"), getBoolean("isActive"), getLong("createdAt"), getLong("updatedAt"))
@@ -194,7 +196,7 @@ private fun JSONObject.toGoal() = GoalEntity(getString("id"), getString("title")
 private fun JSONObject.toNote() = NoteEntity(getString("id"), getString("title"), getString("body"), optString("category", "普通笔记"), optBoolean("isFavorite"), optBoolean("isArchived"), getLong("createdAt"), getLong("updatedAt"))
 private fun JSONObject.toTag() = TagEntity(getString("id"), getString("name"), getLong("createdAt"))
 private fun JSONObject.toRelation() = NoteTagRelation(getString("noteId"), getString("tagId"))
-private fun JSONObject.toJournal() = JournalEntryEntity(getString("id"), getString("localDate"), optString("completedText"), optString("learnedText"), optString("reflectionText"), optString("tomorrowText"), getLong("createdAt"), getLong("updatedAt"))
+private fun JSONObject.toJournal() = JournalEntryEntity(getString("id"), getString("localDate"), optString("completedText"), optString("learnedText"), optString("reflectionText"), optString("tomorrowText"), optString("changeText"), optString("selfAffirmationText"), optString("gratitudeText"), optString("tomorrowThreeText"), getLong("createdAt"), getLong("updatedAt"))
 
 private fun JSONObject.optNullableString(name: String): String? = if (isNull(name)) null else optString(name).ifBlank { null }
 private fun JSONObject.optNullableLong(name: String): Long? = if (isNull(name)) null else optLong(name)

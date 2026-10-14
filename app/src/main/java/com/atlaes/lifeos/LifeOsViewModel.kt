@@ -77,8 +77,8 @@ class LifeOsViewModel(private val repository: LifeOsRepository) : ViewModel() {
         viewModelScope.launch { repository.deleteNote(note) }
     }
 
-    fun saveJournal(completed: String, learned: String, reflection: String, tomorrow: String) {
-        viewModelScope.launch { repository.saveJournal(today, completed, learned, reflection, tomorrow) }
+    fun saveJournal(completed: String, learned: String, reflection: String, change: String, tomorrow: String, affirmation: String, gratitude: String, tomorrowThree: String) {
+        viewModelScope.launch { repository.saveJournal(today, completed, learned, reflection, tomorrow, change, affirmation, gratitude, tomorrowThree) }
     }
 }
 

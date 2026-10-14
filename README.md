@@ -22,7 +22,8 @@ LifeOS 围绕五个动作设计：
 - 笔记：新增、编辑、删除、关键词搜索、单篇 Markdown 导出
 - 笔记整理：分类、标签编辑与筛选、收藏和归档
 - 笔记迁移：单篇 Markdown、全部笔记 ZIP 导出，Markdown 或 ZIP 导入预览与合并
-- 日记：按日期保存四个可选反思问题
+- 日记：按日期保存完整反思模板，包括完成事项、收获、问题内耗、可改变事项、明天最小行动、自我肯定、感恩和明日三件事
+- 日记迁移：独立 JSON 导入导出，支持预览、按日期合并和覆盖同日期内容
 - 数据导出：通过 Android Storage Access Framework 导出完整 JSON
 - 数据导入：JSON 格式校验、导入预览、合并导入和覆盖恢复
 - 备份恢复：Room 事务写入，恢复失败时不执行部分替换
@@ -63,7 +64,7 @@ app/src/main/java/com/atlaes/lifeos/
 
 ## 数据模型
 
-当前 Room schema 版本为 `2`，包含：
+当前 Room schema 版本为 `3`，包含：
 
 - `Habit`：习惯定义
 - `HabitRecord`：某习惯某一天的独立记录，`habitId + localDate` 唯一
@@ -71,6 +72,8 @@ app/src/main/java/com/atlaes/lifeos/
 - `Note`：标题、正文、分类、收藏和归档字段
 - `Tag`、`NoteTagRelation`：标签字典和笔记关联
 - `JournalEntry`：按日期保存的日记
+
+数据库从 v2 到 v3 使用显式 Migration 增加日记模板字段，旧日记内容会保留。
 
 数据库升级必须使用显式 Migration，不能使用破坏性迁移替代正式数据迁移。
 
@@ -121,7 +124,7 @@ Room 仪器测试覆盖：
 - 同一习惯同一天重复写入只保留一条记录
 - JSON 备份能够保留中文、换行和引号
 
-已在 `Medium_Phone` Android 模拟器运行 `:app:connectedDebugAndroidTest`，覆盖独立日期打卡、JSON 备份恢复、无效版本不覆盖现有数据、Markdown ZIP 往返和路径穿越拒绝。Debug APK 已在该模拟器安装并启动。尚未在真实手机上验证。
+已在 `Medium_Phone` Android 模拟器运行 `:app:connectedDebugAndroidTest`，覆盖独立日期打卡、JSON 备份恢复、无效版本不覆盖现有数据、Markdown ZIP 往返、路径穿越拒绝和每日日记导入导出及日期冲突策略。Debug APK 已在该模拟器安装并启动。尚未在真实手机上验证。
 
 ## 手动验证导航
 
@@ -134,6 +137,7 @@ Room 仪器测试覆盖：
 - 日记历史编辑与搜索
 - 完整备份中的主题偏好（当前主题由 DataStore 单独保存）
 - 真机回归测试与发布签名 APK
+- 日记 Markdown 阅读版导出
 
 ## 许可证和开源参考
 

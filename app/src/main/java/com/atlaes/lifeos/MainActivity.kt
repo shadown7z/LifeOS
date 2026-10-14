@@ -41,6 +41,8 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
@@ -105,6 +107,7 @@ import com.atlaes.lifeos.data.ImportPreview
 import com.atlaes.lifeos.data.LifeOsBackupService
 import com.atlaes.lifeos.data.NoteMarkdownService
 import com.atlaes.lifeos.data.MarkdownNote
+import com.atlaes.lifeos.data.JournalTransferService
 import com.atlaes.lifeos.data.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -647,31 +650,93 @@ private fun MoreRow(icon: ImageVector, title: String, subtitle: String, onClick:
 @Composable
 private fun JournalScreen(
     entries: List<com.atlaes.lifeos.data.database.JournalEntryEntity>,
-    onSave: (String, String, String, String) -> Unit,
+    onSave: (String, String, String, String, String, String, String, String) -> Unit,
 ) {
+    val context = LocalContext.current
+    val app = context.applicationContext as LifeOsApplication
+    val scope = rememberCoroutineScope()
+    val transferService = remember { JournalTransferService(app.database) }
     val today = LocalDate.now().toString()
     val entry = entries.firstOrNull { it.localDate == today }
     var completed by remember(entry?.id) { mutableStateOf(entry?.completedText.orEmpty()) }
     var learned by remember(entry?.id) { mutableStateOf(entry?.learnedText.orEmpty()) }
     var reflection by remember(entry?.id) { mutableStateOf(entry?.reflectionText.orEmpty()) }
+    var change by remember(entry?.id) { mutableStateOf(entry?.changeText.orEmpty()) }
     var tomorrow by remember(entry?.id) { mutableStateOf(entry?.tomorrowText.orEmpty()) }
+    var affirmation by remember(entry?.id) { mutableStateOf(entry?.selfAffirmationText.orEmpty()) }
+    var gratitude by remember(entry?.id) { mutableStateOf(entry?.gratitudeText.orEmpty()) }
+    var tomorrowThree by remember(entry?.id) { mutableStateOf(entry?.tomorrowThreeText.orEmpty()) }
+    var importPreview by remember { mutableStateOf<com.atlaes.lifeos.data.JournalImportPreview?>(null) }
     val dateLabel = LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE  M月d日"))
-    LifeOsPage(title = "每日日记", eyebrow = dateLabel, action = { TextButton(onClick = { onSave(completed, learned, reflection, tomorrow) }) { Text("保存") } }) { padding ->
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) scope.launch(Dispatchers.IO) {
+            runCatching {
+                val json = transferService.exportJson()
+                context.contentResolver.openOutputStream(uri)?.use { it.write(json.toByteArray(Charsets.UTF_8)) } ?: error("无法打开目标文件")
+            }.onSuccess { withContext(Dispatchers.Main) { Toast.makeText(context, "每日日记已导出", Toast.LENGTH_SHORT).show() } }
+                .onFailure { error -> withContext(Dispatchers.Main) { Toast.makeText(context, "导出失败：${error.message}", Toast.LENGTH_LONG).show() } }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch(Dispatchers.IO) {
+            runCatching {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(20 * 1024 * 1024 + 1) } ?: error("无法读取文件")
+                transferService.preview(bytes.toString(Charsets.UTF_8))
+            }.onSuccess { preview -> withContext(Dispatchers.Main) { importPreview = preview } }
+                .onFailure { error -> withContext(Dispatchers.Main) { Toast.makeText(context, "日记文件无效：${error.message}", Toast.LENGTH_LONG).show() } }
+        }
+    }
+    LifeOsPage(title = "每日日记", eyebrow = dateLabel, action = {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) }) { Icon(Icons.Default.FileOpen, contentDescription = "导入日记") }
+            IconButton(onClick = { exportLauncher.launch("lifeos-journal.json") }) { Icon(Icons.Default.FileDownload, contentDescription = "导出日记") }
+            TextButton(onClick = { onSave(completed, learned, reflection, change, tomorrow, affirmation, gratitude, tomorrowThree) }) { Text("保存") }
+        }
+    }) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { Text("给今天留几句话", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
-            item { JournalField("今天完成了什么？", completed) { completed = it } }
-            item { JournalField("今天学会了什么？", learned) { learned = it } }
-            item { JournalField("今天有什么值得反思的？", reflection) { reflection = it } }
-            item { JournalField("明天最重要的一件事是什么？", tomorrow) { tomorrow = it } }
+            item { Text("给今天留一份完整记录", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+            item { Text("日期：$today", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium) }
+            item { JournalField("今天完成了什么？", "1.\n2.\n3.", completed) { completed = it } }
+            item { JournalField("今天最大的收获是什么？", "今天学到了什么？对自己有什么新的认识？", learned) { learned = it } }
+            item { JournalField("今天遇到的问题 / 内耗是什么？", "有什么让我焦虑、不舒服？", reflection) { reflection = it } }
+            item { JournalField("我能改变什么？", "把注意力放回能改变的事情", change) { change = it } }
+            item { JournalField("明天最小行动是什么？", "小到可以马上开始", tomorrow) { tomorrow = it } }
+            item { JournalField("今天值得肯定自己的地方", "哪怕很小", affirmation) { affirmation = it } }
+            item { JournalField("今天值得感恩的一件事", "我已经拥有但容易忽略的东西", gratitude) { gratitude = it } }
+            item { JournalField("明天最重要的三件事", "1.\n2.\n3.", tomorrowThree) { tomorrowThree = it } }
             item { Text("日记按日期保存，今天的内容可以随时继续编辑", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
+    }
+    importPreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { importPreview = null },
+            title = { Text("导入每日日记") },
+            text = { Text("检测到 ${preview.count} 篇日记。按日期识别，可选择跳过已有日期或覆盖同日期内容。") },
+            dismissButton = { TextButton(onClick = { importPreview = null }) { Text("取消") } },
+            confirmButton = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = {
+                        val items = preview.entries
+                        scope.launch { runCatching { transferService.import(items, replaceSameDate = false) }.onSuccess { count -> Toast.makeText(context, "已合并导入 $count 篇日记", Toast.LENGTH_SHORT).show() }.onFailure { error -> Toast.makeText(context, "导入失败：${error.message}", Toast.LENGTH_LONG).show() }; importPreview = null }
+                    }) { Text("跳过已有") }
+                    Button(onClick = {
+                        val items = preview.entries
+                        scope.launch { runCatching { transferService.import(items, replaceSameDate = true) }.onSuccess { count -> Toast.makeText(context, "已覆盖导入 $count 篇日记", Toast.LENGTH_SHORT).show() }.onFailure { error -> Toast.makeText(context, "导入失败：${error.message}", Toast.LENGTH_LONG).show() }; importPreview = null }
+                    }) { Text("覆盖同日期") }
+                }
+            },
+        )
     }
 }
 
 @Composable
-private fun JournalField(prompt: String, value: String, onValueChange: (String) -> Unit) {
+private fun JournalField(prompt: String, hint: String, value: String, onValueChange: (String) -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
-        OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text(prompt) }, modifier = Modifier.fillMaxWidth().padding(8.dp), minLines = 3)
+        Column(modifier = Modifier.padding(8.dp)) {
+            Text(prompt, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
+            Text(hint, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+            OutlinedTextField(value = value, onValueChange = onValueChange, label = { Text("记录") }, modifier = Modifier.fillMaxWidth(), minLines = 3)
+        }
     }
 }
 

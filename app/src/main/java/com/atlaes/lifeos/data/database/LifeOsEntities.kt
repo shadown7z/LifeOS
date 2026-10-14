@@ -96,6 +96,10 @@ data class JournalEntryEntity(
     val learnedText: String = "",
     val reflectionText: String = "",
     val tomorrowText: String = "",
+    val changeText: String = "",
+    val selfAffirmationText: String = "",
+    val gratitudeText: String = "",
+    val tomorrowThreeText: String = "",
     val createdAt: Long,
     val updatedAt: Long,
 )

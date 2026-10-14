@@ -9,6 +9,8 @@ import com.atlaes.lifeos.data.database.HabitRecordEntity
 import com.atlaes.lifeos.data.LifeOsBackupService
 import com.atlaes.lifeos.data.NoteMarkdownService
 import com.atlaes.lifeos.data.MarkdownNote
+import com.atlaes.lifeos.data.JournalTransferService
+import com.atlaes.lifeos.data.database.JournalEntryEntity
 import com.atlaes.lifeos.data.database.NoteEntity
 import com.atlaes.lifeos.data.database.LifeOsDatabase
 import java.time.LocalDate
@@ -112,6 +114,33 @@ class LifeOsDatabaseTest {
             }
         }.toByteArray()
         assertTrue(runCatching { NoteMarkdownService(database).parseZip(bytes) }.isFailure)
+    }
+
+    @Test
+    fun journalTransferPreservesTemplateFieldsAndDateConflictStrategy() = runBlocking {
+        val entry = JournalEntryEntity(
+            id = "journal-1",
+            localDate = "2026-10-14",
+            completedText = "1. 完成学习",
+            learnedText = "发现可以拆小任务",
+            reflectionText = "有些焦虑",
+            tomorrowText = "打开编辑器",
+            changeText = "提前安排时间",
+            selfAffirmationText = "我完成了今天的关键任务",
+            gratitudeText = "有安静的时间",
+            tomorrowThreeText = "1. 复习\n2. 跑步\n3. 写日记",
+            createdAt = 1L,
+            updatedAt = 2L,
+        )
+        database.journalDao().upsert(entry)
+        val service = JournalTransferService(database)
+        val preview = service.preview(service.exportJson())
+        assertEquals(entry, preview.entries.single())
+
+        val imported = entry.copy(id = "journal-2", completedText = "覆盖内容")
+        assertEquals(0, service.import(listOf(imported), replaceSameDate = false))
+        assertEquals(1, service.import(listOf(imported), replaceSameDate = true))
+        assertEquals("覆盖内容", database.journalDao().findByDate(entry.localDate)?.completedText)
     }
 
     private fun record(habitId: String, date: LocalDate, completedAt: Long = 1L) = HabitRecordEntity(

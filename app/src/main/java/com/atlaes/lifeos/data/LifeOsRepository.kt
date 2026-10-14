@@ -149,6 +149,10 @@ class LifeOsRepository(
         learnedText: String,
         reflectionText: String,
         tomorrowText: String,
+        changeText: String,
+        selfAffirmationText: String,
+        gratitudeText: String,
+        tomorrowThreeText: String,
     ) {
         val now = System.currentTimeMillis()
         val existing = journalDao.findByDate(date.toString())
@@ -160,6 +164,10 @@ class LifeOsRepository(
                 learnedText = learnedText,
                 reflectionText = reflectionText,
                 tomorrowText = tomorrowText,
+                changeText = changeText,
+                selfAffirmationText = selfAffirmationText,
+                gratitudeText = gratitudeText,
+                tomorrowThreeText = tomorrowThreeText,
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now,
             ),
