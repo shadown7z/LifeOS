@@ -6,6 +6,7 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import com.atlaes.lifeos.data.ThemeMode
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFF176B87),
@@ -40,6 +41,7 @@ private val DarkColors = darkColorScheme(
 )
 
 @Composable
-fun LifeOsTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (isSystemInDarkTheme()) DarkColors else LightColors, content = content)
+fun LifeOsTheme(mode: ThemeMode = ThemeMode.SYSTEM, content: @Composable () -> Unit) {
+    val dark = when (mode) { ThemeMode.DARK -> true; ThemeMode.LIGHT -> false; ThemeMode.SYSTEM -> isSystemInDarkTheme() }
+    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, content = content)
 }

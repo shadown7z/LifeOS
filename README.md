@@ -20,11 +20,13 @@ LifeOS 围绕五个动作设计：
 - 习惯：默认四项每日习惯、按日期打卡、编辑、停用
 - 目标：新增、编辑、删除、下一步行动和关键词搜索
 - 笔记：新增、编辑、删除、关键词搜索、单篇 Markdown 导出
+- 笔记整理：分类、标签编辑与筛选、收藏和归档
+- 笔记迁移：单篇 Markdown、全部笔记 ZIP 导出，Markdown 或 ZIP 导入预览与合并
 - 日记：按日期保存四个可选反思问题
 - 数据导出：通过 Android Storage Access Framework 导出完整 JSON
 - 数据导入：JSON 格式校验、导入预览、合并导入和覆盖恢复
 - 备份恢复：Room 事务写入，恢复失败时不执行部分替换
-- 主题：浅色、深色和跟随系统主题基础
+- 主题：浅色、深色和跟随系统，使用 DataStore 持久化选择
 
 ## 技术栈
 
@@ -34,6 +36,7 @@ LifeOS 围绕五个动作设计：
 - Navigation Compose
 - MVVM + ViewModel + StateFlow
 - Room + SQLite
+- DataStore Preferences
 - Kotlin Coroutines / Flow
 - KSP
 - Storage Access Framework
@@ -50,6 +53,8 @@ app/src/main/java/com/atlaes/lifeos/
 └── data/
     ├── LifeOsRepository.kt         # 数据访问和业务写入
     ├── LifeOsBackupService.kt      # JSON 备份、导入和 Markdown 导出
+    ├── NoteMarkdownService.kt      # Markdown 和 ZIP 笔记迁移
+    ├── ThemePreference.kt          # 主题偏好
     └── database/
         ├── LifeOsDatabase.kt       # Room 数据库和 Migration
         ├── LifeOsDaos.kt           # DAO
@@ -116,7 +121,7 @@ Room 仪器测试覆盖：
 - 同一习惯同一天重复写入只保留一条记录
 - JSON 备份能够保留中文、换行和引号
 
-当前开发环境没有 `adb` 和已连接 Android 设备，因此仪器测试已完成编译，但需要在 Android Studio 模拟器或真机上执行。
+已在 `Medium_Phone` Android 模拟器运行 `:app:connectedDebugAndroidTest`，覆盖独立日期打卡、JSON 备份恢复、无效版本不覆盖现有数据、Markdown ZIP 往返和路径穿越拒绝。Debug APK 已在该模拟器安装并启动。尚未在真实手机上验证。
 
 ## 手动验证导航
 
@@ -124,12 +129,11 @@ Room 仪器测试覆盖：
 
 ## 当前未完成
 
-- 标签编辑和标签筛选 UI
-- 收藏、归档筛选 UI
-- 多篇 Markdown ZIP 导出
-- Markdown 和 ZIP 导入
-- DataStore 主题偏好持久化
-- Android 真机和模拟器完整回归测试
+- 多篇笔记的任意勾选导出入口（当前支持单篇与全部 ZIP）
+- 目标状态、优先级和截止日期编辑，以及习惯历史统计
+- 日记历史编辑与搜索
+- 完整备份中的主题偏好（当前主题由 DataStore 单独保存）
+- 真机回归测试与发布签名 APK
 
 ## 许可证和开源参考
 

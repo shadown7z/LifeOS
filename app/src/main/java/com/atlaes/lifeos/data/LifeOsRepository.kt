@@ -9,6 +9,11 @@ import com.atlaes.lifeos.data.database.JournalEntryEntity
 import com.atlaes.lifeos.data.database.JournalDao
 import com.atlaes.lifeos.data.database.NoteDao
 import com.atlaes.lifeos.data.database.NoteEntity
+import com.atlaes.lifeos.data.database.NoteTagRelation
+import com.atlaes.lifeos.data.database.TagDao
+import com.atlaes.lifeos.data.database.TagEntity
+import androidx.room.withTransaction
+import com.atlaes.lifeos.data.database.LifeOsDatabase
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +29,8 @@ class LifeOsRepository(
     private val goalDao: GoalDao,
     private val noteDao: NoteDao,
     private val journalDao: JournalDao,
+    private val tagDao: TagDao,
+    private val database: LifeOsDatabase,
 ) {
     fun observeHabits(date: LocalDate): Flow<List<HabitWithRecord>> = combineHabitStreams(
         habitDao.observeActiveHabits(),
@@ -32,7 +39,9 @@ class LifeOsRepository(
 
     fun observeGoals(): Flow<List<GoalEntity>> = goalDao.observeOpenGoals()
 
-    fun observeNotes(): Flow<List<NoteEntity>> = noteDao.observeActiveNotes()
+    fun observeNotes(): Flow<List<NoteEntity>> = noteDao.observeNotes()
+    fun observeTags(): Flow<List<TagEntity>> = tagDao.observeTags()
+    fun observeNoteTags(): Flow<List<NoteTagRelation>> = tagDao.observeRelations()
 
     fun observeJournalEntries(): Flow<List<JournalEntryEntity>> = journalDao.observeEntries()
 
@@ -101,11 +110,11 @@ class LifeOsRepository(
 
     suspend fun deleteGoal(goal: GoalEntity) = goalDao.delete(goal)
 
-    suspend fun saveNote(id: String?, title: String, body: String, category: String = "普通笔记") {
+    suspend fun saveNote(id: String?, title: String, body: String, category: String = "普通笔记", tagNames: List<String> = emptyList()) {
         require(title.isNotBlank() || body.isNotBlank()) { "笔记标题或正文不能为空" }
         val now = System.currentTimeMillis()
         val existing = id?.let { noteDao.findById(it) }
-        noteDao.upsert(
+        val note =
             NoteEntity(
                 id = existing?.id ?: id ?: UUID.randomUUID().toString(),
                 title = title.trim().ifBlank { "未命名笔记" },
@@ -115,9 +124,22 @@ class LifeOsRepository(
                 isArchived = existing?.isArchived ?: false,
                 createdAt = existing?.createdAt ?: now,
                 updatedAt = now,
-            ),
-        )
+            )
+        database.withTransaction {
+            noteDao.upsert(note)
+            tagDao.deleteRelationsForNote(note.id)
+            tagNames.map { it.trim() }.filter { it.isNotEmpty() }.distinct().forEach { name ->
+                val tag = tagDao.findByName(name) ?: TagEntity(UUID.randomUUID().toString(), name, now).also { tagDao.insertAll(listOf(it)) }
+                tagDao.insertRelations(listOf(NoteTagRelation(note.id, tag.id)))
+            }
+        }
     }
+
+    suspend fun setNoteFavorite(note: NoteEntity, favorite: Boolean) = noteDao.upsert(note.copy(isFavorite = favorite, updatedAt = System.currentTimeMillis()))
+
+    suspend fun setNoteArchived(note: NoteEntity, archived: Boolean) = noteDao.upsert(note.copy(isArchived = archived, updatedAt = System.currentTimeMillis()))
+
+    suspend fun deleteTag(tag: TagEntity) = tagDao.deleteTag(tag.id)
 
     suspend fun deleteNote(note: NoteEntity) = noteDao.delete(note)
 

@@ -71,8 +71,8 @@ interface GoalDao {
 interface NoteDao {
     @Query("SELECT * FROM notes ORDER BY createdAt ASC")
     suspend fun all(): List<NoteEntity>
-    @Query("SELECT * FROM notes WHERE isArchived = 0 ORDER BY isFavorite DESC, updatedAt DESC")
-    fun observeActiveNotes(): Flow<List<NoteEntity>>
+    @Query("SELECT * FROM notes ORDER BY isFavorite DESC, updatedAt DESC")
+    fun observeNotes(): Flow<List<NoteEntity>>
 
     @Query("SELECT * FROM notes WHERE id = :id LIMIT 1")
     suspend fun findById(id: String): NoteEntity?
@@ -89,6 +89,12 @@ interface NoteDao {
 
 @Dao
 interface TagDao {
+    @Query("SELECT * FROM tags ORDER BY name ASC")
+    fun observeTags(): Flow<List<TagEntity>>
+
+    @Query("SELECT * FROM note_tag_relations")
+    fun observeRelations(): Flow<List<NoteTagRelation>>
+
     @Query("SELECT * FROM tags ORDER BY createdAt ASC")
     suspend fun all(): List<TagEntity>
 
@@ -106,6 +112,12 @@ interface TagDao {
 
     @Upsert
     suspend fun insertRelations(relations: List<NoteTagRelation>)
+
+    @Query("DELETE FROM note_tag_relations WHERE noteId = :noteId")
+    suspend fun deleteRelationsForNote(noteId: String)
+
+    @Query("DELETE FROM tags WHERE id = :id")
+    suspend fun deleteTag(id: String)
 }
 
 @Dao

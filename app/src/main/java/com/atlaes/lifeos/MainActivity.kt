@@ -14,6 +14,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,6 +37,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Unarchive
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
@@ -58,6 +64,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -96,6 +103,9 @@ import androidx.compose.ui.platform.LocalContext
 import com.atlaes.lifeos.data.BackupCounts
 import com.atlaes.lifeos.data.ImportPreview
 import com.atlaes.lifeos.data.LifeOsBackupService
+import com.atlaes.lifeos.data.NoteMarkdownService
+import com.atlaes.lifeos.data.MarkdownNote
+import com.atlaes.lifeos.data.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -105,7 +115,11 @@ import java.time.format.DateTimeFormatter
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { LifeOsTheme { LifeOsApp() } }
+        val application = application as LifeOsApplication
+        setContent {
+            val mode by application.themePreference.mode.collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
+            LifeOsTheme(mode) { LifeOsApp() }
+        }
     }
 }
 
@@ -167,7 +181,7 @@ fun LifeOsApp() {
         ) {
             composable("dashboard") { DashboardScreen(state = uiState, onOpen = navController::navigate, onToggleHabit = lifeOsViewModel::setHabitCompleted) }
             composable("goals") { GoalsScreen(goals = uiState.goals, onSave = lifeOsViewModel::saveGoal, onDelete = lifeOsViewModel::deleteGoal) }
-            composable("notes") { NotesScreen(notes = uiState.notes, onSave = lifeOsViewModel::saveNote, onDelete = lifeOsViewModel::deleteNote) }
+            composable("notes") { NotesScreen(notes = uiState.notes, tags = uiState.tags, relations = uiState.noteTags, onSave = lifeOsViewModel::saveNote, onDelete = lifeOsViewModel::deleteNote, onFavorite = lifeOsViewModel::setNoteFavorite, onArchive = lifeOsViewModel::setNoteArchived, onDeleteTag = lifeOsViewModel::deleteTag) }
             composable("habits") { HabitsScreen(habits = uiState.habits, onSave = lifeOsViewModel::saveHabit, onDeactivate = lifeOsViewModel::deactivateHabit) }
             composable("more") { MoreScreen(onOpen = navController::navigate) }
             composable("journal") { JournalScreen(entries = uiState.journalEntries, onSave = lifeOsViewModel::saveJournal) }
@@ -242,7 +256,7 @@ private fun DashboardScreen(
                 )
             }
             item { SectionHeading("阶段重点", "查看目标", onClick = { onOpen("goals") }) }
-            item { FocusGoalCard() }
+            item { FocusGoalCard(state.goals.firstOrNull(), onClick = { onOpen("goals") }) }
             item { QuoteCard() }
         }
     }
@@ -290,21 +304,16 @@ private fun HabitRow(title: String, done: Boolean, onToggle: () -> Unit) {
 }
 
 @Composable
-private fun FocusGoalCard() {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(20.dp)) {
+private fun FocusGoalCard(goal: com.atlaes.lifeos.data.database.GoalEntity?, onClick: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(20.dp)) {
         Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.width(10.dp))
-                Text("完成 LifeOS 第一版", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                AssistChip(onClick = {}, label = { Text("进行中") })
+                Text(goal?.title ?: "添加一个阶段目标", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                goal?.let { Text(it.status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
             }
-            Text("建立一套真正服务每天的生活系统", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                LinearProgressIndicator(progress = { .62f }, modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(6.dp)))
-                Spacer(Modifier.width(12.dp))
-                Text("62%", style = MaterialTheme.typography.labelLarge)
-            }
+            Text(goal?.nextAction?.ifBlank { "设定下一步行动" } ?: "从一件重要的事开始", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -389,8 +398,13 @@ private fun GoalRow(title: String, nextAction: String, onClick: () -> Unit) {
 @Composable
 private fun NotesScreen(
     notes: List<com.atlaes.lifeos.data.database.NoteEntity>,
-    onSave: (String?, String, String) -> Unit,
+    tags: List<com.atlaes.lifeos.data.database.TagEntity>,
+    relations: List<com.atlaes.lifeos.data.database.NoteTagRelation>,
+    onSave: (String?, String, String, String, List<String>) -> Unit,
     onDelete: (com.atlaes.lifeos.data.database.NoteEntity) -> Unit,
+    onFavorite: (com.atlaes.lifeos.data.database.NoteEntity, Boolean) -> Unit,
+    onArchive: (com.atlaes.lifeos.data.database.NoteEntity, Boolean) -> Unit,
+    onDeleteTag: (com.atlaes.lifeos.data.database.TagEntity) -> Unit,
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as LifeOsApplication
@@ -401,6 +415,13 @@ private fun NotesScreen(
     var pendingDelete by remember { mutableStateOf<com.atlaes.lifeos.data.database.NoteEntity?>(null) }
     var title by remember { mutableStateOf("") }
     var body by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("普通笔记") }
+    var tagInput by remember { mutableStateOf("") }
+    var selectedTag by remember { mutableStateOf<String?>(null) }
+    var selectedFilter by remember { mutableStateOf("全部") }
+    var showTags by remember { mutableStateOf(false) }
+    var noteImportPreview by remember { mutableStateOf<List<MarkdownNote>?>(null) }
+    val markdownService = remember { NoteMarkdownService(app.database) }
     var query by remember { mutableStateOf("") }
     var noteToExport by remember { mutableStateOf<com.atlaes.lifeos.data.database.NoteEntity?>(null) }
     val markdownLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
@@ -408,7 +429,8 @@ private fun NotesScreen(
         if (uri != null && note != null) {
             scope.launch(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.openOutputStream(uri)?.use { it.write(backupService.noteMarkdown(note).toByteArray(Charsets.UTF_8)) }
+                    val noteTags = relations.filter { it.noteId == note.id }.mapNotNull { relation -> tags.firstOrNull { it.id == relation.tagId }?.name }
+                    context.contentResolver.openOutputStream(uri)?.use { it.write(markdownService.markdown(MarkdownNote(note, noteTags)).toByteArray(Charsets.UTF_8)) }
                         ?: error("无法打开目标文件")
                 }.onSuccess { withContext(Dispatchers.Main) { Toast.makeText(context, "Markdown 已导出", Toast.LENGTH_SHORT).show() } }
                     .onFailure { error -> withContext(Dispatchers.Main) { Toast.makeText(context, "导出失败：${error.message}", Toast.LENGTH_LONG).show() } }
@@ -416,18 +438,55 @@ private fun NotesScreen(
         }
         noteToExport = null
     }
+    val zipExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) scope.launch(Dispatchers.IO) {
+            runCatching { markdownService.zip(markdownService.allNotes()).also { bytes -> context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("无法打开目标文件") } }
+                .onSuccess { withContext(Dispatchers.Main) { Toast.makeText(context, "Markdown ZIP 已导出", Toast.LENGTH_SHORT).show() } }
+                .onFailure { error -> withContext(Dispatchers.Main) { Toast.makeText(context, "导出失败：${error.message}", Toast.LENGTH_LONG).show() } }
+        }
+    }
+    val markdownImportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch(Dispatchers.IO) {
+            runCatching {
+                val bytes = context.contentResolver.openInputStream(uri)?.use { input -> input.readNBytes(20 * 1024 * 1024 + 1) } ?: error("无法读取文件")
+                require(bytes.size <= 20 * 1024 * 1024) { "文件不能超过 20 MB" }
+                if (bytes.take(4).toByteArray().contentEquals(byteArrayOf(0x50, 0x4b, 0x03, 0x04))) markdownService.parseZip(bytes)
+                else listOf(markdownService.parseMarkdown(bytes.toString(Charsets.UTF_8)))
+            }.onSuccess { items -> withContext(Dispatchers.Main) { noteImportPreview = items } }
+                .onFailure { error -> withContext(Dispatchers.Main) { Toast.makeText(context, "导入文件无效：${error.message}", Toast.LENGTH_LONG).show() } }
+        }
+    }
     fun openEditor(note: com.atlaes.lifeos.data.database.NoteEntity?) {
         editorNote = note
         title = note?.title.orEmpty()
         body = note?.body.orEmpty()
+        category = note?.category ?: "普通笔记"
+        tagInput = note?.let { current -> relations.filter { it.noteId == current.id }.mapNotNull { relation -> tags.firstOrNull { it.id == relation.tagId }?.name }.joinToString(", ") }.orEmpty()
         showEditor = true
     }
     LifeOsPage(title = "笔记", eyebrow = "把想法放在合适的位置", action = { IconButton(onClick = { openEditor(null) }) { Icon(Icons.Default.Add, contentDescription = "新增笔记") } }) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item { SearchInput("搜索标题、正文或标签", query) { query = it } }
-            item { SectionHeading("最近更新", "标签", onClick = {}) }
-            val filteredNotes = notes.filter { query.isBlank() || it.title.contains(query, ignoreCase = true) || it.body.contains(query, ignoreCase = true) || it.category.contains(query, ignoreCase = true) }
-            items(filteredNotes) { note -> NoteRow(note, onClick = { openEditor(note) }) }
+            item {
+                Row(modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("全部", "收藏", "归档").forEach { filter -> FilterChip(selected = selectedFilter == filter, onClick = { selectedFilter = filter }, label = { Text(filter) }) }
+                    tags.forEach { tag -> FilterChip(selected = selectedTag == tag.id, onClick = { selectedTag = if (selectedTag == tag.id) null else tag.id }, label = { Text(tag.name) }) }
+                }
+            }
+            item { SectionHeading("笔记", "管理标签", onClick = { showTags = true }) }
+            item {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { zipExportLauncher.launch("lifeos-notes.zip") }) { Text("导出全部 Markdown") }
+                    TextButton(onClick = { markdownImportLauncher.launch(arrayOf("text/markdown", "text/plain", "application/zip", "application/octet-stream")) }) { Text("导入 Markdown") }
+                }
+            }
+            val filteredNotes = notes.filter { note ->
+                val matchesView = when (selectedFilter) { "收藏" -> note.isFavorite && !note.isArchived; "归档" -> note.isArchived; else -> !note.isArchived }
+                val matchesTag = selectedTag == null || relations.any { it.noteId == note.id && it.tagId == selectedTag }
+                val matchesQuery = query.isBlank() || note.title.contains(query, ignoreCase = true) || note.body.contains(query, ignoreCase = true) || note.category.contains(query, ignoreCase = true) || relations.any { relation -> relation.noteId == note.id && tags.any { it.id == relation.tagId && it.name.contains(query, ignoreCase = true) } }
+                matchesView && matchesTag && matchesQuery
+            }
+            items(filteredNotes, key = { it.id }) { note -> NoteRow(note, onClick = { openEditor(note) }, onFavorite = { onFavorite(note, !note.isFavorite) }, onArchive = { onArchive(note, !note.isArchived) }) }
             if (filteredNotes.isEmpty()) item { EmptyHint(if (query.isBlank()) "写下一个刚刚想到的念头" else "没有匹配的笔记") }
         }
     }
@@ -439,6 +498,8 @@ private fun NotesScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("标题") }, singleLine = true)
                     OutlinedTextField(value = body, onValueChange = { body = it }, label = { Text("正文") }, minLines = 5)
+                    OutlinedTextField(value = category, onValueChange = { category = it }, label = { Text("分类") }, singleLine = true)
+                    OutlinedTextField(value = tagInput, onValueChange = { tagInput = it }, label = { Text("标签 用逗号分隔") }, singleLine = true)
                 }
             },
             dismissButton = {
@@ -448,7 +509,7 @@ private fun NotesScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (editorNote != null) TextButton(onClick = { noteToExport = editorNote; markdownLauncher.launch("${safeFileName(editorNote?.title ?: "note")}.md") }) { Text("导出 Markdown") }
                     Button(enabled = title.isNotBlank() || body.isNotBlank(), onClick = {
-                        onSave(editorNote?.id, title, body)
+                        onSave(editorNote?.id, title, body, category.trim().ifBlank { "普通笔记" }, tagInput.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() })
                         showEditor = false
                     }) { Text("保存") }
                 }
@@ -464,15 +525,29 @@ private fun NotesScreen(
             confirmButton = { Button(onClick = { onDelete(note); pendingDelete = null }) { Text("删除") } },
         )
     }
+    if (showTags) AlertDialog(
+        onDismissRequest = { showTags = false },
+        title = { Text("管理标签") },
+        text = { Column { if (tags.isEmpty()) Text("暂无标签") else tags.forEach { tag -> Row(verticalAlignment = Alignment.CenterVertically) { Text(tag.name, modifier = Modifier.weight(1f)); IconButton(onClick = { if (selectedTag == tag.id) selectedTag = null; onDeleteTag(tag) }) { Icon(Icons.Default.Delete, contentDescription = "删除 ${tag.name}") } } } } },
+        confirmButton = { TextButton(onClick = { showTags = false }) { Text("完成") } },
+    )
+    noteImportPreview?.let { imported -> AlertDialog(
+        onDismissRequest = { noteImportPreview = null },
+        title = { Text("导入 Markdown 笔记") },
+        text = { Text("检测到 ${imported.size} 篇笔记，将按稳定 ID 合并，已存在的笔记会跳过。标签和分类会一并导入。") },
+        dismissButton = { TextButton(onClick = { noteImportPreview = null }) { Text("取消") } },
+        confirmButton = { Button(onClick = { scope.launch { runCatching { markdownService.import(imported) }.onSuccess { count -> Toast.makeText(context, "已导入 $count 篇笔记", Toast.LENGTH_SHORT).show() }.onFailure { error -> Toast.makeText(context, "导入失败：${error.message}", Toast.LENGTH_LONG).show() }; noteImportPreview = null } }) { Text("确认导入") } },
+    ) }
 }
 
 @Composable
-private fun NoteRow(note: com.atlaes.lifeos.data.database.NoteEntity, onClick: () -> Unit) {
+private fun NoteRow(note: com.atlaes.lifeos.data.database.NoteEntity, onClick: () -> Unit, onFavorite: () -> Unit, onArchive: () -> Unit) {
     Card(modifier = Modifier.clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), shape = RoundedCornerShape(16.dp)) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(note.title, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Icon(Icons.Default.BookmarkBorder, contentDescription = "收藏", tint = MaterialTheme.colorScheme.outline)
+                IconButton(onClick = onFavorite) { Icon(if (note.isFavorite) Icons.Default.Bookmark else Icons.Default.BookmarkBorder, contentDescription = if (note.isFavorite) "取消收藏" else "收藏", tint = MaterialTheme.colorScheme.primary) }
+                IconButton(onClick = onArchive) { Icon(if (note.isArchived) Icons.Default.Unarchive else Icons.Default.Archive, contentDescription = if (note.isArchived) "取消归档" else "归档", tint = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
             Text(note.body.ifBlank { "还没有正文" }, maxLines = 2, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(note.category, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
@@ -496,7 +571,7 @@ private fun HabitsScreen(
     }
     LifeOsPage(title = "习惯", eyebrow = "稳定的小事会带来变化", action = { IconButton(onClick = { openEditor(null) }) { Icon(Icons.Default.Add, contentDescription = "新增习惯") } }) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            item { HabitSummaryCard() }
+            item { HabitSummaryCard(habits.count { it.record != null }, habits.size) }
             item { SectionHeading("每日习惯", "历史记录", onClick = {}) }
             items(habits) { item -> HabitDetailRow(item.habit.title, item.record != null, onClick = { openEditor(item.habit) }) }
         }
@@ -523,12 +598,12 @@ private fun HabitsScreen(
 }
 
 @Composable
-private fun HabitSummaryCard() {
+private fun HabitSummaryCard(completed: Int, total: Int) {
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(22.dp)) {
         Row(modifier = Modifier.fillMaxWidth().padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text("本周坚持", color = MaterialTheme.colorScheme.onPrimaryContainer)
-                Text("18 次", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("今日完成", color = MaterialTheme.colorScheme.onPrimaryContainer)
+                Text("$completed / $total", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             }
             Icon(Icons.Default.Spa, contentDescription = null, modifier = Modifier.size(48.dp), tint = MaterialTheme.colorScheme.primary)
         }
@@ -606,6 +681,8 @@ private fun SettingsScreen() {
     val app = context.applicationContext as LifeOsApplication
     val service = remember { LifeOsBackupService(app.database) }
     val scope = rememberCoroutineScope()
+    val themeMode by app.themePreference.mode.collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
+    var showThemeDialog by remember { mutableStateOf(false) }
     var importJson by remember { mutableStateOf<String?>(null) }
     var importPreview by remember { mutableStateOf<ImportPreview?>(null) }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
@@ -624,8 +701,10 @@ private fun SettingsScreen() {
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
                 runCatching {
-                    val json = context.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(20 * 1024 * 1024 + 1) }
                         ?: error("无法读取文件")
+                    require(bytes.size <= 20 * 1024 * 1024) { "备份文件不能超过 20 MB" }
+                    val json = bytes.toString(Charsets.UTF_8)
                     service.preview(json) to json
                 }.onSuccess { (preview, json) -> withContext(Dispatchers.Main) { importPreview = preview; importJson = json } }
                     .onFailure { error -> withContext(Dispatchers.Main) { Toast.makeText(context, "导入文件无效：${error.message}", Toast.LENGTH_LONG).show() } }
@@ -635,7 +714,7 @@ private fun SettingsScreen() {
     LifeOsPage(title = "设置", eyebrow = "让 LifeOS 更适合你") { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { SettingGroupTitle("外观") }
-            item { SettingRow(Icons.Default.WbSunny, "主题", "跟随系统") }
+            item { SettingRow(Icons.Default.WbSunny, "主题", when (themeMode) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "浅色"; ThemeMode.DARK -> "深色" }, onClick = { showThemeDialog = true }) }
             item { SettingGroupTitle("数据") }
             item { SettingRow(Icons.Default.CheckCircle, "导入数据", "从 LifeOS JSON 导入并预览", onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) }) }
             item { SettingRow(Icons.Default.BookmarkBorder, "导出数据", "保存完整 JSON 数据", onClick = { exportLauncher.launch("lifeos-backup.json") }) }
@@ -673,6 +752,16 @@ private fun SettingsScreen() {
             },
         )
     }
+    if (showThemeDialog) AlertDialog(
+        onDismissRequest = { showThemeDialog = false },
+        title = { Text("主题") },
+        text = { Column { listOf(ThemeMode.SYSTEM to "跟随系统", ThemeMode.LIGHT to "浅色", ThemeMode.DARK to "深色").forEach { (mode, label) ->
+            Row(modifier = Modifier.fillMaxWidth().clickable { scope.launch { app.themePreference.setMode(mode) }; showThemeDialog = false }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, modifier = Modifier.weight(1f)); if (mode == themeMode) Icon(Icons.Default.Check, contentDescription = "已选择")
+            }
+        } } },
+        confirmButton = { TextButton(onClick = { showThemeDialog = false }) { Text("取消") } },
+    )
 }
 
 @Composable
