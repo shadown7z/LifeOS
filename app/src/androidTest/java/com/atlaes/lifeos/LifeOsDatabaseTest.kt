@@ -12,6 +12,9 @@ import com.atlaes.lifeos.data.MarkdownNote
 import com.atlaes.lifeos.data.JournalTransferService
 import com.atlaes.lifeos.data.database.JournalEntryEntity
 import com.atlaes.lifeos.data.database.NoteEntity
+import com.atlaes.lifeos.data.database.GoalEntity
+import com.atlaes.lifeos.data.database.TagEntity
+import com.atlaes.lifeos.data.database.NoteTagRelation
 import com.atlaes.lifeos.data.database.LifeOsDatabase
 import java.time.LocalDate
 import kotlinx.coroutines.runBlocking
@@ -79,6 +82,45 @@ class LifeOsDatabaseTest {
         service.restore(json, replaceExisting = true)
         assertEquals("想法：长期主义", database.noteDao().all().single().title)
         assertEquals("第一行\n第二行，包含 \"引号\"", database.noteDao().all().single().body)
+    }
+
+    @Test
+    fun completeJsonBackupRestoresEveryEntityAndRelation() = runBlocking {
+        val habit = HabitEntity("habit-backup", "跑步", createdAt = 1L, updatedAt = 2L)
+        val record = record(habit.id, LocalDate.of(2026, 10, 14), completedAt = 3L)
+        val goal = GoalEntity("goal-backup", "完成项目", nextAction = "写测试", createdAt = 1L, updatedAt = 2L)
+        val note = NoteEntity("note-backup", "笔记", "正文", createdAt = 1L, updatedAt = 2L)
+        val tag = TagEntity("tag-backup", "学习", 1L)
+        val relation = NoteTagRelation(note.id, tag.id)
+        val journal = JournalEntryEntity("journal-backup", "2026-10-14", completedText = "1. 写测试", createdAt = 1L, updatedAt = 2L)
+        database.habitDao().upsert(habit)
+        database.habitDao().upsertRecord(record)
+        database.goalDao().upsert(goal)
+        database.noteDao().upsert(note)
+        database.tagDao().insertAll(listOf(tag))
+        database.tagDao().insertRelations(listOf(relation))
+        database.journalDao().upsert(journal)
+
+        val service = LifeOsBackupService(database)
+        val json = service.exportJson()
+        val counts = service.preview(json).counts
+        assertEquals(1, counts.habits)
+        assertEquals(1, counts.habitRecords)
+        assertEquals(1, counts.goals)
+        assertEquals(1, counts.notes)
+        assertEquals(1, counts.tags)
+        assertEquals(1, counts.noteTagRelations)
+        assertEquals(1, counts.journalEntries)
+
+        database.clearAllTables()
+        service.restore(json, replaceExisting = true)
+        assertEquals(habit, database.habitDao().all().single())
+        assertEquals(record, database.habitDao().allRecords().single())
+        assertEquals(goal, database.goalDao().all().single())
+        assertEquals(note, database.noteDao().all().single())
+        assertEquals(tag, database.tagDao().all().single())
+        assertEquals(relation, database.tagDao().allRelations().single())
+        assertEquals(journal, database.journalDao().all().single())
     }
 
     @Test

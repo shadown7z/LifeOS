@@ -21,6 +21,7 @@ data class BackupCounts(
     val goals: Int,
     val notes: Int,
     val tags: Int,
+    val noteTagRelations: Int,
     val journalEntries: Int,
 )
 
@@ -46,7 +47,7 @@ class LifeOsBackupService(private val database: LifeOsDatabase) {
     }
 
     suspend fun exportJson(): String = withContext(Dispatchers.IO) {
-        val snapshot = readSnapshot()
+        val snapshot = database.withTransaction { readSnapshot() }
         JSONObject().apply {
             put("formatVersion", 1)
             put("appName", "LifeOS")
@@ -77,6 +78,7 @@ class LifeOsBackupService(private val database: LifeOsDatabase) {
                 goals = entities.arraySize("goals"),
                 notes = entities.arraySize("notes"),
                 tags = entities.arraySize("tags"),
+                noteTagRelations = entities.arraySize("noteTagRelations"),
                 journalEntries = entities.arraySize("journalEntries"),
             ),
             formatVersion = version,

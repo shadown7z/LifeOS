@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ChevronRight
@@ -120,6 +121,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
+import java.time.Instant
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 class MainActivity : ComponentActivity() {
@@ -151,6 +154,23 @@ private fun topLevelRoute(route: String?): String = when (route) {
 @Composable
 fun LifeOsApp() {
     val application = androidx.compose.ui.platform.LocalContext.current.applicationContext as LifeOsApplication
+    val context = LocalContext.current
+    val backupManager = application.externalBackupManager
+    val scope = rememberCoroutineScope()
+    var showBackupSetup by remember { mutableStateOf(backupManager.shouldPromptForDirectory()) }
+    val backupState by backupManager.state.collectAsStateWithLifecycle()
+    val directoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) {
+            Toast.makeText(context, "尚未选择备份目录，可在设置中继续授权", Toast.LENGTH_LONG).show()
+        } else scope.launch {
+            backupManager.selectDirectory(uri)
+                .onSuccess { Toast.makeText(context, "备份目录已授权", Toast.LENGTH_SHORT).show() }
+                .onFailure { error ->
+                    showBackupSetup = true
+                    Toast.makeText(context, "目录设置失败：${error.message}", Toast.LENGTH_LONG).show()
+                }
+        }
+    }
     val lifeOsViewModel: LifeOsViewModel = viewModel(factory = LifeOsViewModelFactory(application.repository))
     val uiState by lifeOsViewModel.uiState.collectAsStateWithLifecycle()
     val navController = rememberNavController()
@@ -211,6 +231,17 @@ fun LifeOsApp() {
             }
         }
     }
+    if (showBackupSetup && backupState.needsAuthorization) AlertDialog(
+        onDismissRequest = { showBackupSetup = false; backupManager.markPromptSeen() },
+        title = { Text("设置外部备份目录") },
+        text = { Text("请在手机共享存储中选择 Data 文件夹；LifeOS 将在其中创建 LifeOSDat。也可以直接选择 Data/LifeOSDat。若 Data 不存在，请先在系统文件选择器中创建。${if (backupState.status.startsWith("备份失败")) "\n\n${backupState.status}" else ""}") },
+        confirmButton = { Button(onClick = {
+            backupManager.markPromptSeen()
+            showBackupSetup = false
+            directoryLauncher.launch(backupManager.initialPickerUri())
+        }) { Text("选择目录") } },
+        dismissButton = { TextButton(onClick = { showBackupSetup = false; backupManager.markPromptSeen() }) { Text("稍后") } },
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -883,12 +914,24 @@ private fun JournalField(prompt: String, hint: String, value: String, onValueCha
 private fun SettingsScreen() {
     val context = LocalContext.current
     val app = context.applicationContext as LifeOsApplication
+    val backupManager = app.externalBackupManager
     val service = remember { LifeOsBackupService(app.database) }
     val scope = rememberCoroutineScope()
+    val backupState by backupManager.state.collectAsStateWithLifecycle()
     val themeMode by app.themePreference.mode.collectAsStateWithLifecycle(initialValue = ThemeMode.SYSTEM)
     var showThemeDialog by remember { mutableStateOf(false) }
     var importJson by remember { mutableStateOf<String?>(null) }
     var importPreview by remember { mutableStateOf<ImportPreview?>(null) }
+    var importSource by remember { mutableStateOf<String?>(null) }
+    val directoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null) {
+            Toast.makeText(context, "未选择目录，当前备份设置未更改", Toast.LENGTH_SHORT).show()
+        } else scope.launch {
+            backupManager.selectDirectory(uri)
+                .onSuccess { Toast.makeText(context, "备份目录已授权", Toast.LENGTH_SHORT).show() }
+                .onFailure { error -> Toast.makeText(context, "目录设置失败：${error.message}", Toast.LENGTH_LONG).show() }
+        }
+    }
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) {
             scope.launch(Dispatchers.IO) {
@@ -910,7 +953,7 @@ private fun SettingsScreen() {
                     require(bytes.size <= 20 * 1024 * 1024) { "备份文件不能超过 20 MB" }
                     val json = bytes.toString(Charsets.UTF_8)
                     service.preview(json) to json
-                }.onSuccess { (preview, json) -> withContext(Dispatchers.Main) { importPreview = preview; importJson = json } }
+                }.onSuccess { (preview, json) -> withContext(Dispatchers.Main) { importPreview = preview; importJson = json; importSource = "所选文件" } }
                     .onFailure { error -> withContext(Dispatchers.Main) { Toast.makeText(context, "导入文件无效：${error.message}", Toast.LENGTH_LONG).show() } }
             }
         }
@@ -919,37 +962,64 @@ private fun SettingsScreen() {
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp, 8.dp, 20.dp, 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { SettingGroupTitle("外观") }
             item { SettingRow(Icons.Default.WbSunny, "主题", when (themeMode) { ThemeMode.SYSTEM -> "跟随系统"; ThemeMode.LIGHT -> "浅色"; ThemeMode.DARK -> "深色" }, onClick = { showThemeDialog = true }) }
-            item { SettingGroupTitle("数据") }
+            item { SettingGroupTitle("外部备份") }
+            item { SettingRow(Icons.Default.FolderOpen, "备份目录", backupState.directory ?: "未授权 · 请选 Data/LifeOSDat", onClick = { directoryLauncher.launch(backupManager.initialPickerUri()) }) }
+            item {
+                Text(
+                    "最近成功：${backupState.lastSuccessAt?.let(::formatBackupTime) ?: "尚无"}\n状态：${backupState.status}",
+                    color = if (backupState.status.startsWith("备份失败")) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
+                )
+            }
+            item { SettingRow(Icons.Default.FileDownload, "立即备份", if (backupState.isRunning) "正在写入并校验" else "保存完整 JSON 到备份目录", onClick = {
+                if (!backupState.isRunning) scope.launch {
+                    backupManager.backupNow()
+                        .onSuccess { Toast.makeText(context, "备份已写入并校验", Toast.LENGTH_SHORT).show() }
+                        .onFailure { error -> Toast.makeText(context, "备份失败：${error.message}", Toast.LENGTH_LONG).show() }
+                }
+            }) }
+            item { SettingRow(Icons.Default.FileOpen, "从备份目录恢复", "读取最近一份完整 JSON 备份", onClick = {
+                scope.launch {
+                    backupManager.latestBackup()
+                        .onSuccess { (name, json) ->
+                            importPreview = service.preview(json)
+                            importJson = json
+                            importSource = name
+                        }
+                        .onFailure { error -> Toast.makeText(context, "读取失败：${error.message}", Toast.LENGTH_LONG).show() }
+                }
+            }) }
+            item { SettingGroupTitle("数据文件") }
             item { SettingRow(Icons.Default.CheckCircle, "导入数据", "从 LifeOS JSON 导入并预览", onClick = { importLauncher.launch(arrayOf("application/json", "text/plain")) }) }
             item { SettingRow(Icons.Default.BookmarkBorder, "导出数据", "保存完整 JSON 数据", onClick = { exportLauncher.launch("lifeos-backup.json") }) }
-            item { SettingRow(Icons.Default.Spa, "备份与恢复", "导入页可选择合并或覆盖恢复") }
             item { SettingGroupTitle("关于") }
             item { SettingRow(Icons.Default.Psychology, "关于 LifeOS", "版本 1.0 · 数据格式 v1") }
         }
     }
     importPreview?.let { preview ->
         AlertDialog(
-            onDismissRequest = { importPreview = null; importJson = null },
+            onDismissRequest = { importPreview = null; importJson = null; importSource = null },
             title = { Text("确认导入") },
-            text = { Text(previewSummary(preview.counts)) },
+            text = { Text("来源：${importSource ?: "备份文件"}\n\n${previewSummary(preview.counts)}") },
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = {
                         val json = importJson ?: return@TextButton
                         scope.launch {
-                            runCatching { service.restore(json, replaceExisting = false) }
+                            backupManager.restore(json, replaceExisting = false)
                                 .onSuccess { Toast.makeText(context, "数据已合并导入", Toast.LENGTH_SHORT).show() }
                                 .onFailure { error -> Toast.makeText(context, "导入失败：${error.message}", Toast.LENGTH_LONG).show() }
-                            importPreview = null; importJson = null
+                            importPreview = null; importJson = null; importSource = null
                         }
                     }) { Text("合并导入") }
                     Button(onClick = {
                         val json = importJson ?: return@Button
                         scope.launch {
-                            runCatching { service.restore(json, replaceExisting = true) }
+                            backupManager.restore(json, replaceExisting = true)
                                 .onSuccess { Toast.makeText(context, "数据已覆盖恢复", Toast.LENGTH_SHORT).show() }
                                 .onFailure { error -> Toast.makeText(context, "恢复失败：${error.message}", Toast.LENGTH_LONG).show() }
-                            importPreview = null; importJson = null
+                            importPreview = null; importJson = null; importSource = null
                         }
                     }) { Text("覆盖恢复") }
                 }
@@ -981,7 +1051,11 @@ private fun SettingRow(icon: ImageVector, title: String, subtitle: String, onCli
     }
 }
 
-private fun previewSummary(counts: BackupCounts): String = "习惯 ${counts.habits} 项\n打卡记录 ${counts.habitRecords} 条\n目标 ${counts.goals} 个\n笔记 ${counts.notes} 篇\n标签 ${counts.tags} 个\n日记 ${counts.journalEntries} 篇\n\n覆盖恢复会替换当前业务数据"
+private fun previewSummary(counts: BackupCounts): String = "习惯 ${counts.habits} 项\n打卡记录 ${counts.habitRecords} 条\n目标 ${counts.goals} 个\n笔记 ${counts.notes} 篇\n标签 ${counts.tags} 个\n笔记标签关联 ${counts.noteTagRelations} 条\n日记 ${counts.journalEntries} 篇\n\n覆盖恢复会替换当前业务数据"
+
+private fun formatBackupTime(timestamp: Long): String = Instant.ofEpochMilli(timestamp)
+    .atZone(ZoneId.systemDefault())
+    .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
 
 private fun safeFileName(value: String): String = value.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "note" }.take(80)
 

@@ -27,7 +27,8 @@ LifeOS 围绕五个动作设计：
 - 学习方法：从“更多”进入，浏览和搜索 15 种学习方法，查看完整步骤与适用边界
 - 数据导出：通过 Android Storage Access Framework 导出完整 JSON
 - 数据导入：JSON 格式校验、导入预览、合并导入和覆盖恢复
-- 备份恢复：Room 事务写入，恢复失败时不执行部分替换
+- 外部备份：首次启动引导授权共享存储 `Data/LifeOSDat/`，支持自动备份、立即备份、目录恢复和状态查看
+- 备份恢复：Room 事务快照与事务恢复；先写临时文件并回读校验，确认正式 JSON 后保留最近 5 份备份
 - 主题：浅色、深色和跟随系统，使用 DataStore 持久化选择
 
 ## 技术栈
@@ -42,6 +43,7 @@ LifeOS 围绕五个动作设计：
 - Kotlin Coroutines / Flow
 - KSP
 - Storage Access Framework
+- WorkManager、DocumentFile
 - JUnit、Android Instrumentation Test、Android Lint
 
 ## 工程结构
@@ -55,6 +57,7 @@ app/src/main/java/com/atlaes/lifeos/
 └── data/
     ├── LifeOsRepository.kt         # 数据访问和业务写入
     ├── LifeOsBackupService.kt      # JSON 备份、导入和 Markdown 导出
+    ├── ExternalBackupManager.kt    # SAF 目录授权、自动备份和安全文件写入
     ├── NoteMarkdownService.kt      # Markdown 和 ZIP 笔记迁移
     ├── ThemePreference.kt          # 主题偏好
     ├── LearningMethods.kt          # 15 种学习方法内容
@@ -103,6 +106,10 @@ app/src/main/java/com/atlaes/lifeos/
 
 导入流程会先解析和校验格式，再显示实体数量。合并导入按稳定 ID 跳过已存在记录；标签名称冲突会复用已有标签。覆盖恢复会在用户确认后使用单个 Room 事务替换业务数据。
 
+默认外部备份目录是手机共享存储中的 `Data/LifeOSDat/`。首次启动选择 `Data` 文件夹时，LifeOS 会尝试创建 `LifeOSDat`；也可以直接选择已存在的 `Data/LifeOSDat`。Android 不允许应用在未获 SAF 授权时直接写入共享存储。目录不存在或无法创建时，应用会提示重新选择，不会更改 Room 数据库。
+
+业务表在事务提交后触发延迟自动备份，WorkManager 提供后台执行、失败重试和低频周期兜底。备份写入唯一临时文件，回读校验后改名为正式 JSON；新文件验证成功前不会删除旧备份。设置页可查看目录、最近一次成功时间和错误状态，并执行立即备份或从目录恢复。卸载重装后需要重新选择目录，再预览并恢复原备份。
+
 ## 构建和测试
 
 在 Windows PowerShell 中执行：
@@ -125,8 +132,9 @@ Room 仪器测试覆盖：
 - 同一习惯在不同日期的记录不会互相覆盖
 - 同一习惯同一天重复写入只保留一条记录
 - JSON 备份能够保留中文、换行和引号
+- 完整备份能恢复习惯、打卡、目标、笔记、标签关联和日记
 
-已在 `Medium_Phone` Android 模拟器运行 `:app:connectedDebugAndroidTest`，覆盖独立日期打卡、JSON 备份恢复、无效版本不覆盖现有数据、Markdown ZIP 往返、路径穿越拒绝和每日日记导入导出及日期冲突策略。Debug APK 已在该模拟器安装并启动。尚未在真实手机上验证。
+本轮仪器测试在连接的 Android 设备上通过 9 项测试。模拟器中还验证了 SAF 目录授权、自动和手动备份：测试备份包含 1 篇日记、2 个目标和 3 条习惯记录。卸载重装、重新选择目录并覆盖恢复后，再次备份的实体内容与原备份一致。真实手机上的目录选择和重装恢复仍需单独回归。
 
 ## 手动验证导航
 
